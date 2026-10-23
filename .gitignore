@@ -1,0 +1,9 @@
+# runtime data
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/secret_key
+.env
+__pycache__/
+*.pyc
+venv/

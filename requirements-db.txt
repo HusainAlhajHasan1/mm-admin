@@ -1,0 +1,4 @@
+# Optional: needed only for full direct-message visibility through a direct
+# read-only connection to the Mattermost database (see README).
+psycopg2-binary>=2.9,<3
+PyMySQL>=1.1,<2

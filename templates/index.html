@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mattermost Admin</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%233d7dff'/%3E%3Cpath d='M9 10.5h14v8.6a2 2 0 0 1-2 2h-6.4L10 24v-2.9H9V10.5z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css?v={{ asset_version }}">
+</head>
+<body class="app-body">
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.6 9.6 0 0 1-3.9-.9L3 21l1.9-4.6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">Mattermost Admin</div>
+        <div class="brand-sub">Control panel</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-label">Manage</div>
+      <button class="nav-item active" data-view="overview" title="Overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <span>Overview</span>
+      </button>
+      <button class="nav-item" data-view="users" title="Users">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Users</span>
+        <span class="nav-badge" id="nav-user-count"></span>
+      </button>
+      <button class="nav-item" data-view="teams" title="Teams">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Teams</span>
+        <span class="nav-badge" id="nav-team-count"></span>
+      </button>
+      <button class="nav-item" data-view="chats" title="Chats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.6 9.6 0 0 1-3.9-.9L3 21l1.9-4.6A8.4 8.4 0 1 1 21 11.5z"/><path d="M8 10h8M8 13.5h5"/></svg>
+        <span>Chats</span>
+      </button>
+
+      <div class="nav-label">Insights</div>
+      <button class="nav-item" data-view="presence" title="Presence">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg>
+        <span>Presence</span>
+      </button>
+      <button class="nav-item" data-view="locations" title="Locations">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span>Locations</span>
+      </button>
+      <button class="nav-item" data-view="audit" title="Activity log">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>Activity</span>
+      </button>
+
+      <div class="nav-label">System</div>
+      <button class="nav-item" data-view="settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M1 14h6M9 8h6M17 16h6"/></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="me">
+        <div class="avatar sm" id="me-avatar">A</div>
+        <div class="me-info">
+          <div class="me-name" id="me-name">Administrator</div>
+          <div class="me-user" id="me-username">@admin</div>
+        </div>
+        <button class="logout-btn" id="logout-btn" title="Sign out" aria-label="Sign out">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="content">
+    <header class="topbar">
+      <button class="icon-btn mobile-only" id="menu-btn" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div>
+        <h1 id="page-title">Overview</h1>
+        <p id="page-sub">Loading…</p>
+      </div>
+      <div class="topbar-right">
+        <span class="pill pill-live" id="server-pill"><span class="dot"></span><span id="server-label">Mattermost</span></span>
+        <button class="icon-btn" id="global-refresh" title="Refresh data">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- ============================ OVERVIEW ============================ -->
+      <section class="view active" id="view-overview">
+        <div class="grid stats" id="ov-stats">
+          <div class="stat"><div class="stat-icon"></div><div class="stat-value skeleton" style="width:60px">&nbsp;</div><div class="stat-label">Loading…</div></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h2>Online right now</h2>
+              <span class="pill pill-live" id="ov-online-pill"><span class="dot"></span><span id="ov-online-count">0</span> online</span>
+            </div>
+            <div id="ov-online"><div class="empty sm">Loading…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h2>Latest locations</h2>
+              <button class="link-btn" data-goto="locations">Open locations →</button>
+            </div>
+            <div id="ov-locations"><div class="empty sm">Loading…</div></div>
+          </div>
+        </div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Quick actions</h2></div>
+            <div class="quick">
+              <button class="btn" data-action="add-user">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+                Add a user
+              </button>
+              <button class="btn" data-action="add-team">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+                Create a team
+              </button>
+              <button class="btn" data-goto="chats">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.6 9.6 0 0 1-3.9-.9L3 21l1.9-4.6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+                Read conversations
+              </button>
+              <button class="btn" data-view-target="presence">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg>
+                Presence history
+              </button>
+            </div>
+            <div class="callout" id="ov-mode-note"></div>
+            <div id="ov-health"></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h2>Recent admin activity</h2>
+              <button class="link-btn" data-goto="audit">View all →</button>
+            </div>
+            <div id="ov-audit"><div class="empty sm">Loading…</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ USERS ============================ -->
+      <section class="view" id="view-users">
+        <div class="card">
+          <div class="toolbar">
+            <div class="search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input id="user-search" type="search" placeholder="Search by name, username, email or team…">
+            </div>
+            <select id="user-status-filter" style="width:auto">
+              <option value="all">All statuses</option>
+              <option value="connected">Online / away / DND</option>
+              <option value="online">Online</option>
+              <option value="away">Away</option>
+              <option value="dnd">Do not disturb</option>
+              <option value="offline">Offline</option>
+            </select>
+            <label class="switch"><input type="checkbox" id="user-show-inactive" checked> Show deactivated</label>
+            <div class="spacer"></div>
+            <button class="btn btn-sm btn-ghost" id="export-users-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+              Export
+            </button>
+            <button class="btn btn-sm btn-primary" data-action="add-user">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+              Add user
+            </button>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="users-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th class="hide-sm">Email</th>
+                  <th>Teams</th>
+                  <th>Status</th>
+                  <th class="hide-sm">Last seen</th>
+                  <th class="hide-sm">Location</th>
+                  <th class="right">Actions</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="7"><div class="empty sm">Loading users…</div></td></tr></tbody>
+            </table>
+          </div>
+          <div class="toolbar" style="margin:12px 0 0">
+            <span class="muted small" id="users-sub"></span>
+            <div class="spacer"></div>
+            <span class="tiny muted">Click a row for full details</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ TEAMS ============================ -->
+      <section class="view" id="view-teams">
+        <div class="toolbar">
+          <span class="muted small" id="teams-sub"></span>
+          <div class="spacer"></div>
+          <button class="btn btn-sm btn-primary" data-action="add-team">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+            Create team
+          </button>
+        </div>
+        <div class="grid team-grid" id="teams-grid"></div>
+      </section>
+
+      <!-- ============================ CHATS ============================ -->
+      <section class="view" id="view-chats">
+        <div class="toolbar chat-mobile-nav">
+          <button class="btn btn-sm" data-action="chat-show-users">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            Choose user
+          </button>
+          <button class="btn btn-sm" data-action="chat-show-partners">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.6 9.6 0 0 1-3.9-.9L3 21l1.9-4.6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+            Conversations
+          </button>
+        </div>
+        <div class="chat-layout">
+          <div class="card chat-users">
+            <div class="card-head"><h2>Choose a user</h2></div>
+            <div class="search sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input id="chat-user-search" type="search" placeholder="Search users…">
+            </div>
+            <div class="chat-list" id="chat-user-list"></div>
+          </div>
+          <div class="card chat-partners">
+            <div class="card-head"><h2 id="chat-partners-title">Conversations</h2></div>
+            <div class="chat-list" id="chat-partner-list">
+              <div class="empty sm">Select a user to see who they talked to.</div>
+            </div>
+          </div>
+          <div class="card chat-convo">
+            <div class="chat-head">
+              <div class="avatar sm" id="chat-convo-avatar">?</div>
+              <div class="grow">
+                <h2 id="chat-convo-title">Select a conversation</h2>
+                <p id="chat-convo-sub">Pick a user, then a conversation on the left.</p>
+              </div>
+              <button class="icon-btn" id="chat-refresh" title="Reload messages">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+              </button>
+            </div>
+            <div id="chat-banner"></div>
+            <div class="messages" id="chat-messages">
+              <div class="chat-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.6 9.6 0 0 1-3.9-.9L3 21l1.9-4.6A8.4 8.4 0 1 1 21 11.5z"/></svg>
+                <strong>Admin chat viewer</strong>
+                <span>Select a user on the left, then pick one of their conversations to read the full message history.</span>
+              </div>
+            </div>
+            <div class="chat-foot hidden" id="chat-foot">
+              <button class="link-btn" id="chat-load-older">Load older messages</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ PRESENCE ============================ -->
+      <section class="view" id="view-presence">
+        <div class="toolbar">
+          <div class="seg" id="presence-range">
+            <button data-hours="24" class="active">24 hours</button>
+            <button data-hours="168">7 days</button>
+            <button data-hours="720">30 days</button>
+          </div>
+          <span class="muted small" id="presence-sub"></span>
+          <div class="spacer"></div>
+          <button class="btn btn-sm btn-ghost" id="presence-refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+            Poll statuses now
+          </button>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table class="table" id="presence-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Status now</th>
+                  <th>Online time</th>
+                  <th class="hide-sm">Last seen</th>
+                  <th>Timeline</th>
+                </tr>
+              </thead>
+              <tbody><tr><td colspan="5"><div class="empty sm">Loading…</div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="presence-detail"></div>
+        <div class="callout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+          <div>Presence history is recorded by this dashboard: every <strong id="presence-poll-label">60</strong> seconds it polls Mattermost for each user's online / away / DND / offline status and stores changes locally. History starts the first time the dashboard is running with a valid admin session (or a Personal Access Token configured in <code>.env</code>).</div>
+        </div>
+      </section>
+
+      <!-- ============================ LOCATIONS ============================ -->
+      <section class="view" id="view-locations">
+        <div class="tabbar" id="loc-tabs">
+          <button data-ltab="live" class="active">Latest locations</button>
+          <button data-ltab="history">History</button>
+          <button data-ltab="agent">Location agent</button>
+        </div>
+
+        <div id="loc-pane-live">
+          <div class="card">
+            <div class="toolbar">
+              <span class="muted small" id="loc-live-sub">Last known position per user</span>
+              <div class="spacer"></div>
+              <label class="switch"><input type="checkbox" id="loc-auto"> Auto-refresh 30 s</label>
+              <button class="btn btn-sm btn-ghost" data-action="sync-audits">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Import login IPs
+              </button>
+              <button class="btn btn-sm" data-action="refresh-view">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="loc-live-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Location</th>
+                    <th class="hide-sm">IP address</th>
+                    <th>Coordinates</th>
+                    <th class="hide-sm">Source</th>
+                    <th>Updated</th>
+                    <th class="right">History</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="7"><div class="empty sm">Loading…</div></td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="callout" id="loc-mode-note"></div>
+        </div>
+
+        <div id="loc-pane-history" class="hidden">
+          <div class="card">
+            <div class="toolbar">
+              <select id="loc-user-filter" style="width:auto;max-width:240px"><option value="">All users</option></select>
+              <select id="loc-source-filter" style="width:auto">
+                <option value="">All sources</option>
+                <option value="agent">Agent</option>
+                <option value="dashboard-login">Dashboard login</option>
+                <option value="audit-log">Mattermost login audit</option>
+                <option value="manual">Manual</option>
+              </select>
+              <select id="loc-limit" style="width:auto">
+                <option value="100">100 rows</option>
+                <option value="200" selected>200 rows</option>
+                <option value="500">500 rows</option>
+                <option value="1000">1000 rows</option>
+              </select>
+              <div class="spacer"></div>
+              <a class="btn btn-sm btn-ghost" id="loc-export-btn" href="/api/locations/export.csv" download>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+                Export CSV
+              </a>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="loc-history-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>User</th>
+                    <th>IP</th>
+                    <th>Location</th>
+                    <th class="hide-sm">ISP / network</th>
+                    <th>Coordinates</th>
+                    <th class="hide-sm">Source</th>
+                  </tr>
+                </thead>
+                <tbody><tr><td colspan="7"><div class="empty sm">Loading…</div></td></tr></tbody>
+              </table>
+            </div>
+            <div class="toolbar" style="margin:12px 0 0">
+              <span class="muted small" id="loc-history-sub"></span>
+              <div class="spacer"></div>
+              <button class="btn btn-sm btn-ghost hidden" id="loc-load-more">Load more</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="loc-pane-agent" class="hidden">
+          <div id="loc-agent-content"><div class="empty sm">Loading…</div></div>
+        </div>
+      </section>
+
+      <!-- ============================ AUDIT ============================ -->
+      <section class="view" id="view-audit">
+        <div class="card">
+          <div class="toolbar">
+            <span class="muted small">Every action performed through this dashboard is recorded locally.</span>
+            <div class="spacer"></div>
+            <button class="btn btn-sm btn-ghost" data-action="refresh-view">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="audit-table">
+              <thead>
+                <tr><th>Time</th><th>Admin</th><th>Action</th><th>Target</th><th class="hide-sm">Details</th><th class="hide-sm">IP</th></tr>
+              </thead>
+              <tbody><tr><td colspan="6"><div class="empty sm">Loading…</div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ SETTINGS ============================ -->
+      <section class="view" id="view-settings">
+        <div id="settings-content"><div class="empty sm">Loading…</div></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="modal-root"></div>
+<div id="toast-root" class="toast-root"></div>
+
+<script>window.__BOOT__ = {{ boot|tojson }};</script>
+<script src="/static/app.js?v={{ asset_version }}"></script>
+</body>
+</html>

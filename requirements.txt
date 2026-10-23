@@ -1,0 +1,4 @@
+# Core dependencies (required)
+Flask>=3.0,<4
+waitress>=3.0,<4
+requests>=2.31,<3

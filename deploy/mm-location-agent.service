@@ -1,0 +1,15 @@
+[Unit]
+Description=Mattermost Location Agent
+Documentation=file:///opt/mm-location-agent/README.txt
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/mm-location-agent
+ExecStart=/usr/bin/python3 /opt/mm-location-agent/mm-location-agent.py
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
