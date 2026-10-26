@@ -946,6 +946,42 @@
     return u ? u.username : '';
   }
 
+  function fmtBytes(n) {
+    n = num(n);
+    if (!n) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+  }
+
+  function fileLabel(f) {
+    var ext = (f.ext || '').toUpperCase();
+    return ext ? ext.slice(0, 5) : 'FILE';
+  }
+
+  function renderAttachments(files) {
+    if (!files || !files.length) return '';
+    var out = '<div class="attachments">';
+    files.forEach(function (f) {
+      var url = '/api/files/' + encodeURIComponent(f.id);
+      var name = h(f.name || 'attachment');
+      var size = f.size ? ' · ' + h(fmtBytes(f.size)) : '';
+      if (f.is_image) {
+        out += '<a class="attach-img" href="' + url + '" target="_blank" rel="noopener" title="' + name + '">' +
+          '<img src="' + url + '" alt="' + name + '" loading="lazy">' +
+          '<span class="attach-cap">' + name + size + '</span></a>';
+      } else {
+        out += '<a class="attach-file" href="' + url + '" target="_blank" rel="noopener" download>' +
+          '<span class="attach-ext">' + h(fileLabel(f)) + '</span>' +
+          '<span class="grow"><span class="attach-name">' + name + '</span>' +
+          '<span class="attach-size">' + h(size.replace(' · ', '')) + '</span></span>' +
+          icon('download', 13) + '</a>';
+      }
+    });
+    return out + '</div>';
+  }
+
   function renderMessages() {
     var box = $('#chat-messages');
     var msgs = state.chat.messages;
@@ -959,7 +995,7 @@
     var showDeleted = state.chat.showDeleted !== false;
     var hiddenDeleted = 0;
     msgs.forEach(function (m) {
-      if (!m.message && !m.deleted) return;
+      if (!m.message && !m.deleted && !(m.files && m.files.length)) return;
       if (m.deleted && !showDeleted) { hiddenDeleted++; return; }
       var day = fmtDayKey(m.create_at);
       if (day && day !== lastDay) {
@@ -988,10 +1024,11 @@
       } else {
         body = h(m.message);
       }
+      var attach = renderAttachments(m.files);
+      var bubble = (body || (!m.deleted && !attach) ? '<div class="msg-bubble' + extraClass + '">' + body + '</div>' : '');
       html += '<div class="msg' + (mine ? ' mine' : '') + (m.deleted ? ' deleted' : '') + (m.is_system ? ' system-row' : '') + '">' +
         avatarHtml({ username: uname || '?', name: name }, '', false) +
-        '<div class="msg-body"><div class="msg-meta">' + meta + '</div>' +
-        '<div class="msg-bubble' + extraClass + '">' + body + '</div></div></div>';
+        '<div class="msg-body"><div class="msg-meta">' + meta + '</div>' + bubble + attach + '</div></div>';
     });
     if (hiddenDeleted) {
       html = '<div class="chat-hidden-note">' + hiddenDeleted + ' deleted message' +
@@ -1371,6 +1408,14 @@
       '<pre class="code">' + h('# Add to .env, then restart the dashboard:\nDATABASE_URL=postgresql://mattermost:PASSWORD@127.0.0.1:5432/mattermost\n# or: DATABASE_URL=mysql://mattermost:PASSWORD@127.0.0.1:3306/mattermost') + '</pre>' +
       '<p class="tiny muted" style="margin-top:10px">The connection is opened read-only. Use a dedicated DB user with SELECT-only rights where possible. Reading private conversations should be covered by your organisation\'s policy — inform your users.</p>' +
       '<div class="callout" style="margin-top:12px">' + icon('info') + '<div><strong>Deleted messages</strong> stay in the <code>posts</code> table with <code>DeleteAt &gt; 0</code>, and Mattermost usually keeps the original text. In database mode this dashboard shows them with a <em>deleted</em> badge and their deletion time; use the <strong>Deleted</strong> switch above a conversation to hide them. The REST API cannot provide this — a database connection is required.</div></div>' +
+      '</div>' +
+      '<div class="card"><div class="card-head"><h2>File storage</h2>' +
+      (s.media_dir ? '<span class="pill pill-live"><span class="dot"></span>Attachments readable</span>'
+                   : '<span class="pill pill-amber">Data directory not found</span>') + '</div>' +
+      '<p class="small muted" style="margin-bottom:10px">Images and files sent in chats are read directly from the Mattermost data directory, so they can be shown even inside other users\' conversations.</p>' +
+      '<dl class="kv"><dt>Directory</dt><dd><code>' + h(s.media_dir || 'not configured') + '</code></dd></dl>' +
+      (s.media_dir ? '' : '<pre class="code">' + h('# add to .env, then restart:\nMM_DATA_DIR=/opt/mattermost/data') + '</pre>' +
+        '<p class="tiny muted" style="margin-top:8px">The service user must be able to read it: <code>sudo usermod -aG mattermost mm-admin</code></p>') +
       '</div>' +
       '<div class="card"><div class="card-head"><h2>Location agent</h2></div>' +
       '<p class="small muted" style="margin-bottom:12px">Optional agent for city-level tracking of user machines (public IP based). Download the script with your key pre-filled.</p>' +

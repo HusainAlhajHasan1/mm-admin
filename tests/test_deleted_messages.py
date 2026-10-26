@@ -48,6 +48,9 @@ def build_db():
         CREATE TABLE posts (id TEXT PRIMARY KEY, createat INTEGER, updateat INTEGER,
                             deleteat INTEGER DEFAULT 0, userid TEXT, channelid TEXT,
                             message TEXT, type TEXT, rootid TEXT, props TEXT DEFAULT '');
+        CREATE TABLE fileinfo (id TEXT PRIMARY KEY, postid TEXT, name TEXT, extension TEXT,
+                               size INTEGER, mimetype TEXT, width INTEGER, height INTEGER,
+                               deleteat INTEGER DEFAULT 0, path TEXT, createat INTEGER DEFAULT 0);
         """
     )
     cur.executemany("INSERT INTO users (id, username, email) VALUES (?,?,?)", [
@@ -80,6 +83,17 @@ def build_db():
             "rootid,props) VALUES (?,?,?,?,?,?,?,?,'',?)",
             (pid, created, created + 10, deleted, user, "c-dm", msg, ptype, props),
         )
+    # Attachments: one image on a live post, one PDF on a deleted post
+    cur.executemany(
+        "INSERT INTO fileinfo (id,postid,name,extension,size,mimetype,width,height,deleteat,path)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("f-img", "p1", "screenshot.png", "png", 2048, "image/png", 800, 600, 0,
+             "20261026/files/abc/screenshot.png"),
+            ("f-pdf", "p4", "contract.pdf", "pdf", 90000, "application/pdf", 0, 0, 0,
+             "20261026/files/def/contract.pdf"),
+        ],
+    )
     con.commit()
     return con
 
@@ -136,6 +150,18 @@ def main():
         ordered = [p["id"] for p in posts]
         check("messages ordered oldest to newest",
               ordered == ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8"], str(ordered))
+        check("image attachment attached to its post",
+              len(by_id["p1"]["files"]) == 1 and by_id["p1"]["files"][0]["is_image"] is True,
+              str(by_id["p1"].get("files")))
+        check("attachment filename preserved",
+              by_id["p1"]["files"][0]["name"] == "screenshot.png")
+        check("non-image attachment flagged as file",
+              by_id["p4"]["files"][0]["is_image"] is False,
+              str(by_id["p4"].get("files")))
+        check("deleted post keeps its attachment",
+              len(by_id["p4"]["files"]) == 1)
+        check("post without attachments returns empty list",
+              by_id["p2"]["files"] == [])
         check("plugin post text recovered from props",
               by_id["p8"]["message"] == "Call ended", repr(by_id["p8"]["message"]))
         check("props text flagged as from_props", by_id["p8"]["from_props"] is True)

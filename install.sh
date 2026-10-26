@@ -74,7 +74,7 @@ ok "user: ${RUN_USER}"
 step "Installing files into ${APP_DIR}"
 mkdir -p "${APP_DIR}/data"
 if [[ "${SRC_DIR}" != "${APP_DIR}" ]]; then
-  for item in app.py requirements.txt requirements-db.txt templates static agent deploy README.md .env.example; do
+  for item in app.py requirements.txt requirements-db.txt templates static agent deploy tools tests README.md PUBLISH-TO-GITHUB.md LICENSE .env.example; do
     if [[ -e "${SRC_DIR}/${item}" ]]; then
       cp -a "${SRC_DIR}/${item}" "${APP_DIR}/"
     fi
@@ -148,6 +148,35 @@ if ! "${VENV_PY}" -c "import flask, waitress, requests" >/dev/null 2>&1; then
 fi
 ok "dependencies ready"
 
+step "Checking Mattermost file storage (for chat attachments)"
+MM_DATA_DIR_DETECTED=""
+for candidate in "${MM_DATA_DIR:-}" /opt/mattermost/data /var/opt/mattermost/data /mattermost/data; do
+  if [[ -n "${candidate}" && -d "${candidate}" ]]; then
+    MM_DATA_DIR_DETECTED="${candidate}"
+    break
+  fi
+done
+if [[ -n "${MM_DATA_DIR_DETECTED}" ]]; then
+  ok "file storage: ${MM_DATA_DIR_DETECTED}"
+  if ! runuser -u "${RUN_USER}" -- test -r "${MM_DATA_DIR_DETECTED}" 2>/dev/null; then
+    if getent group mattermost >/dev/null 2>&1; then
+      usermod -aG mattermost "${RUN_USER}" 2>/dev/null && \
+        ok "added ${RUN_USER} to the 'mattermost' group (needed to read attachments)" || \
+        warn "could not add ${RUN_USER} to the mattermost group"
+    fi
+  fi
+  if runuser -u "${RUN_USER}" -- test -r "${MM_DATA_DIR_DETECTED}" 2>/dev/null; then
+    ok "attachments readable by ${RUN_USER}"
+  else
+    warn "attachments are NOT readable by ${RUN_USER} - images will show as missing."
+    warn "Fix with:  usermod -aG mattermost ${RUN_USER} && systemctl restart mm-admin"
+    warn "Or set MM_DATA_DIR in ${APP_DIR}/.env if your data lives elsewhere."
+  fi
+else
+  warn "Mattermost data directory not found - attachments will not be shown."
+  warn "Set MM_DATA_DIR in ${APP_DIR}/.env (Mattermost FileSettings.Directory)."
+fi
+
 step "Checking configuration"
 if [[ ! -f "${APP_DIR}/.env" ]]; then
   cp "${APP_DIR}/.env.example" "${APP_DIR}/.env"
@@ -165,6 +194,14 @@ if [[ ! -f "${APP_DIR}/.env" ]]; then
   DASH_PORT_ESC="$(printf '%s' "${DASH_PORT}" | sed -e 's/[&|]/\\&/g')"
   sed -i "s|^MM_URL=.*|MM_URL=${MM_URL_ESC}|" "${APP_DIR}/.env"
   sed -i "s|^DASH_PORT=.*|DASH_PORT=${DASH_PORT_ESC}|" "${APP_DIR}/.env"
+  if [[ -n "${MM_DATA_DIR_DETECTED}" ]]; then
+    if grep -qE '^#?[[:space:]]*MM_DATA_DIR=' "${APP_DIR}/.env"; then
+      sed -i "s|^#\{0,1\}[[:space:]]*MM_DATA_DIR=.*|MM_DATA_DIR=${MM_DATA_DIR_DETECTED}|" "${APP_DIR}/.env"
+    else
+      printf '\n# Mattermost data directory (chat attachments)\nMM_DATA_DIR=%s\n' \
+        "${MM_DATA_DIR_DETECTED}" >> "${APP_DIR}/.env"
+    fi
+  fi
   chmod 600 "${APP_DIR}/.env"
   ok "created ${APP_DIR}/.env"
 else

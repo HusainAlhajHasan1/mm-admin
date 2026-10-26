@@ -16,6 +16,8 @@ No cloud services, no external JS/CSS, no build step — a small Flask app plus 
 
 ![Deleted messages are shown with their text and deletion time](docs/screenshots/chats-deleted.png)
 
+![Images inline, other files as download chips](docs/screenshots/chats-attachments.png)
+
 | Locations | Settings |
 |---|---|
 | ![Locations](docs/screenshots/locations.png) | ![Settings](docs/screenshots/settings.png) |
@@ -125,6 +127,7 @@ All settings live in `/opt/mm-admin/.env`. Restart after editing (`systemctl res
 | `DASH_INSECURE_TLS` | `0` | Accept self-signed certificates from Mattermost. |
 | `DASH_COOKIE_SECURE` | `0` | Set to `1` when serving the dashboard over HTTPS. |
 | `PUBLIC_URL` | *(auto)* | Base URL embedded into downloaded agent scripts. |
+| `MM_DATA_DIR` | *(auto-detected)* | Mattermost `FileSettings.Directory`, used to read chat attachments (images/files). Auto-detected in `/opt/mattermost/data` and friends. |
 | `MMCTL_PATH` | *(auto-detected)* | Full path to the `mmctl` binary. Used as a fallback for operations the REST API forbids (permanent deletion). Auto-detected in `/opt/mattermost/bin/mmctl` and `PATH`. |
 | `MM_OS_USER` | `mattermost` | OS user that owns the Mattermost installation. When the dashboard runs as root it calls `runuser -u <user> -- mmctl --local …`. |
 
@@ -191,6 +194,29 @@ After editing `.env`, restart the service. The Settings page shows **Database co
 ### B. REST API only (default, limited)
 
 Without `DATABASE_URL` the dashboard uses the normal API. You can still see the list of people a user has DM'd in many cases, but opening the conversation of two other users will usually fail with `403`, and the UI explains why. Chats where the admin is a participant work normally. This mode requires no database credentials.
+
+### Attachments (images, PDFs, any uploaded file)
+
+Mattermost keeps attachments in the `fileinfo` table and the bytes on disk under
+`FileSettings.Directory` (usually `/opt/mattermost/data`). The dashboard reads both
+and shows:
+
+* **images** inline in the conversation (click to open full size)
+* **any other file** as a download chip with its type, name and size
+
+Setup: the `mm-admin` service user must be able to read that directory. `install.sh`
+detects the path, adds the user to the `mattermost` group and writes `MM_DATA_DIR`
+into `.env`. If your data lives elsewhere:
+
+```
+MM_DATA_DIR=/var/opt/mattermost/data
+```
+
+Then `sudo usermod -aG mattermost mm-admin && sudo systemctl restart mm-admin`.
+
+Attachments are served only to a signed-in admin, through `/api/files/<id>`, and the
+path is validated so a crafted `path` in the database cannot escape the data
+directory. Settings → **File storage** shows whether the directory was found.
 
 ### Deleted messages
 

@@ -143,7 +143,8 @@ DATABASE_URL = _env("DATABASE_URL")  # optional read-only Mattermost DB (Postgre
 AGENT_URL_HINT = _env("PUBLIC_URL", "")  # optional public base URL shown to agents
 MMCTL_PATH = _env("MMCTL_PATH", "")  # optional path to mmctl for operations the API forbids
 MM_OS_USER = _env("MM_OS_USER", "mattermost")  # OS user that owns the Mattermost install
-APP_VERSION = "1.1.0"
+MM_DATA_DIR = _env("MM_DATA_DIR", "")  # FileSettings.Directory (default: auto-detect)
+APP_VERSION = "1.2.0"
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or DATA_DIR, exist_ok=True)
@@ -1014,6 +1015,68 @@ def db_chat_partners(user_id: str) -> list[dict]:
     return out
 
 
+def media_root() -> str | None:
+    """Directory where Mattermost keeps uploaded files (FileSettings.Directory)."""
+    candidates = [MM_DATA_DIR] if MM_DATA_DIR else []
+    candidates += ["/opt/mattermost/data", "/var/opt/mattermost/data",
+                   "/mattermost/data", "/srv/mattermost/data"]
+    for cand in candidates:
+        if cand and os.path.isdir(cand) and os.access(cand, os.R_OK | os.X_OK):
+            return cand
+    return None
+
+
+def safe_media_path(rel_path: str) -> str | None:
+    """Resolve a fileinfo.path inside the media root, refusing traversal."""
+    root = media_root()
+    if not root or not rel_path:
+        return None
+    root_real = os.path.realpath(root)
+    target = os.path.realpath(os.path.join(root_real, rel_path.lstrip("/\\")))
+    if target != root_real and not target.startswith(root_real + os.sep):
+        return None
+    return target if os.path.isfile(target) else None
+
+
+def shape_file(row: dict) -> dict:
+    size = row.get("size") or 0
+    mime = row.get("mimetype") or ""
+    return {
+        "id": row.get("id"),
+        "name": row.get("name") or "attachment",
+        "ext": (row.get("extension") or "").lower(),
+        "size": int(size or 0),
+        "mime": mime,
+        "width": row.get("width") or 0,
+        "height": row.get("height") or 0,
+        "is_image": mime.startswith("image/") or (row.get("extension") or "").lower() in
+                    ("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"),
+        "deleted": bool(row.get("deleteat")),
+    }
+
+
+def db_files_for_posts(post_ids: list[str]) -> dict:
+    """post_id -> [attachment metadata] from the fileinfo table."""
+    if not post_ids:
+        return {}
+    marks = ",".join(["%s"] * len(post_ids))
+    rows = db_rows(
+        f"SELECT id, postid, name, extension, size, mimetype, width, height, deleteat, path "
+        f"FROM fileinfo WHERE postid IN ({marks}) ORDER BY createat ASC",
+        f"SELECT Id AS id, PostId AS postid, Name AS name, Extension AS extension, "
+        f"Size AS size, MimeType AS mimetype, Width AS width, Height AS height, "
+        f"DeleteAt AS deleteat, Path AS path FROM FileInfo WHERE PostId IN ({marks}) "
+        f"ORDER BY CreateAt ASC",
+        tuple(post_ids),
+    )
+    out: dict = {}
+    for r in rows:
+        entry = shape_file(r)
+        entry["path"] = r.get("path") or ""
+        out.setdefault(r["postid"], []).append(entry)
+    return out
+
+
 def props_display_text(raw) -> tuple[str, dict]:
     """Plugin posts (e.g. Calls) keep their visible text in `props`, not `message`.
     Return a human-readable string from props plus the parsed dict."""
@@ -1063,11 +1126,18 @@ def db_chat_posts(channel_id: str, page: int = 0, per_page: int = 60) -> dict:
         "ORDER BY CreateAt DESC LIMIT %s OFFSET %s",
         (channel_id, per_page, page * per_page),
     )
+    files_by_post = {}
+    try:
+        files_by_post = db_files_for_posts([r["id"] for r in rows])
+    except MMError:
+        files_by_post = {}   # older schema / no permission: chat still works
+
     posts = []
     for r in rows:
         msg = (r.get("message") or "").strip()
         props_text, props = props_display_text(r.get("props"))
         posts.append({
+            "files": files_by_post.get(r["id"], []),
             "id": r["id"],
             "create_at": ms_to_s(r["createat"]),
             "user_id": r["userid"],
@@ -1151,7 +1221,14 @@ def chat_posts_via_api(channel_id: str, page: int = 0, per_page: int = 60) -> di
         p = (data.get("posts") or {}).get(pid) or {}
         msg = (p.get("message") or "").strip()
         props_text, props = props_display_text(p.get("props"))
+        api_files = (p.get("metadata") or {}).get("files") or []
+        files = [shape_file({"id": f.get("id"), "name": f.get("name"),
+                             "extension": f.get("extension"), "size": f.get("size"),
+                             "mimetype": f.get("mime_type"), "width": f.get("width"),
+                             "height": f.get("height"), "deleteat": 0})
+                 for f in api_files]
         posts.append({
+            "files": files,
             "id": p.get("id"),
             "create_at": ms_to_s(p.get("create_at")),
             "user_id": p.get("user_id"),
@@ -1785,6 +1862,63 @@ def api_user_password(user_id: str):
     return jsonify({"ok": True})
 
 
+@app.get("/api/files/<file_id>")
+@api_login_required
+def api_file(file_id: str):
+    """Serve a chat attachment to a signed-in admin.
+
+    Reads the file straight from the Mattermost data directory (the REST API
+    refuses to hand over files from conversations the admin is not part of).
+    """
+    meta = None
+    try:
+        rows = db_rows(
+            "SELECT id, name, mimetype, path, size FROM fileinfo WHERE id = %s",
+            "SELECT Id AS id, Name AS name, MimeType AS mimetype, Path AS path, "
+            "Size AS size FROM FileInfo WHERE Id = %s",
+            (file_id,),
+        )
+        meta = rows[0] if rows else None
+    except MMError as exc:
+        app.logger.warning("file lookup failed: %s", exc.message)
+
+    if meta and meta.get("path"):
+        disk = safe_media_path(meta["path"])
+        if disk:
+            resp = send_file(disk, mimetype=meta.get("mimetype") or None,
+                             as_attachment=False,
+                             download_name=meta.get("name") or None,
+                             conditional=True, max_age=0)
+            resp.headers["Cache-Control"] = "private, max-age=300"
+            return resp
+        app.logger.info("attachment %s not on disk (%s)", file_id, meta.get("path"))
+
+    # Fall back to the Mattermost API (works for the admin's own conversations).
+    token = session.get("token")
+    if token:
+        try:
+            upstream = requests.get(f"{MM_API}/files/{file_id}", headers={"Authorization": "Bearer " + token},
+                                    timeout=30, verify=VERIFY_TLS, stream=True)
+            if upstream.status_code == 200:
+                resp = Response(upstream.iter_content(chunk_size=32768),
+                                content_type=upstream.headers.get("Content-Type", "application/octet-stream"))
+                name = meta.get("name") if meta else None
+                if name:
+                    resp.headers["Content-Disposition"] = f'inline; filename="{name}"'
+                resp.headers["Cache-Control"] = "private, max-age=300"
+                return resp
+        except requests.RequestException:
+            pass
+
+    root = media_root()
+    if not root:
+        return jsonify({"ok": False, "code": "MEDIA_DIR_MISSING",
+                        "message": "The Mattermost data directory is not readable by the dashboard. "
+                                   "Set MM_DATA_DIR in .env (FileSettings.Directory) and add the "
+                                   "mm-admin user to the mattermost group."}), 404
+    return jsonify({"ok": False, "message": "Attachment file not found on disk."}), 404
+
+
 @app.post("/api/users/<user_id>/revoke-sessions")
 @api_login_required
 @handle_mm_errors
@@ -2305,6 +2439,8 @@ def api_settings():
         "database_url_masked": _mask_db_url(DATABASE_URL),
         "agent_hint_url": AGENT_URL_HINT or "",
         "mmctl_available": mmctl_available(),
+        "media_dir": media_root() or "",
+        "media_dir_configured": MM_DATA_DIR or "",
         "mmctl_path": find_mmctl() or "",
         "status_events": db_scalar("SELECT COUNT(*) FROM status_events", (), 0),
         "location_pings": db_scalar("SELECT COUNT(*) FROM location_pings", (), 0),
