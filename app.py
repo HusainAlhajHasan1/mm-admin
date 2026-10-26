@@ -143,7 +143,7 @@ DATABASE_URL = _env("DATABASE_URL")  # optional read-only Mattermost DB (Postgre
 AGENT_URL_HINT = _env("PUBLIC_URL", "")  # optional public base URL shown to agents
 MMCTL_PATH = _env("MMCTL_PATH", "")  # optional path to mmctl for operations the API forbids
 MM_OS_USER = _env("MM_OS_USER", "mattermost")  # OS user that owns the Mattermost install
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or DATA_DIR, exist_ok=True)
@@ -975,13 +975,23 @@ def db_chat_partners(user_id: str) -> list[dict]:
 
     def last_msg(channel: dict) -> dict:
         rows = db_rows(
-            "SELECT userid, message, createat FROM posts WHERE channelid = %s AND deleteat = 0 "
-            "ORDER BY createat DESC LIMIT 1",
-            "SELECT UserId AS userid, Message AS message, CreateAt AS createat FROM Posts "
-            "WHERE ChannelId = %s AND DeleteAt = 0 ORDER BY CreateAt DESC LIMIT 1",
+            "SELECT userid, message, createat, deleteat, props FROM posts "
+            "WHERE channelid = %s ORDER BY createat DESC LIMIT 1",
+            "SELECT UserId AS userid, Message AS message, CreateAt AS createat, "
+            "DeleteAt AS deleteat, Props AS props FROM Posts WHERE ChannelId = %s "
+            "ORDER BY CreateAt DESC LIMIT 1",
             (channel["id"],),
         )
-        channel["last_message"] = rows[0] if rows else None
+        last = rows[0] if rows else None
+        if last and not (last.get("message") or "").strip():
+            last["message"] = props_display_text(last.get("props"))[0]
+        channel["last_message"] = last
+        counts = db_rows(
+            "SELECT COUNT(*) AS n FROM posts WHERE channelid = %s AND deleteat > 0",
+            "SELECT COUNT(*) AS n FROM Posts WHERE ChannelId = %s AND DeleteAt > 0",
+            (channel["id"],),
+        )
+        channel["deleted_count"] = int((counts[0]["n"] if counts else 0) or 0)
         return channel
 
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -995,10 +1005,33 @@ def db_chat_partners(user_id: str) -> list[dict]:
         p["partner_id"] = other
         p["last_post_at"] = ms_to_s((p.get("last_message") or {}).get("createat")
                                     or p.get("lastpostat"))
-        p["preview"] = ((p.get("last_message") or {}).get("message") or "")[:120]
+        last = p.get("last_message") or {}
+        p["preview"] = (last.get("message") or "")[:120]
+        p["preview_deleted"] = bool(last.get("deleteat"))
+        p["deleted_count"] = p.get("deleted_count") or 0
         out.append(p)
     out.sort(key=lambda x: x.get("last_post_at") or 0, reverse=True)
     return out
+
+
+def props_display_text(raw) -> tuple[str, dict]:
+    """Plugin posts (e.g. Calls) keep their visible text in `props`, not `message`.
+    Return a human-readable string from props plus the parsed dict."""
+    props: dict = {}
+    if isinstance(raw, dict):
+        props = raw
+    elif isinstance(raw, (str, bytes)) and str(raw).strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                props = parsed
+        except (ValueError, TypeError):
+            props = {}
+    for key in ("call", "content", "text", "title", "message", "body", "description"):
+        val = props.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip(), props
+    return "", props
 
 
 def db_chat_posts(channel_id: str, page: int = 0, per_page: int = 60) -> dict:
@@ -1016,24 +1049,37 @@ def db_chat_posts(channel_id: str, page: int = 0, per_page: int = 60) -> dict:
         "SELECT COUNT(*) AS n FROM Posts WHERE ChannelId = %s",
         (channel_id,),
     )[0]["n"]
+    deleted_total = db_rows(
+        "SELECT COUNT(*) AS n FROM posts WHERE channelid = %s AND deleteat > 0",
+        "SELECT COUNT(*) AS n FROM Posts WHERE ChannelId = %s AND DeleteAt > 0",
+        (channel_id,),
+    )[0]["n"]
     rows = db_rows(
-        "SELECT id, createat, userid, message, deleteat, type, rootid FROM posts "
-        "WHERE channelid = %s ORDER BY createat DESC LIMIT %s OFFSET %s",
+        "SELECT id, createat, userid, message, deleteat, type, rootid, updateat, props "
+        "FROM posts WHERE channelid = %s ORDER BY createat DESC LIMIT %s OFFSET %s",
         "SELECT Id AS id, CreateAt AS createat, UserId AS userid, Message AS message, "
-        "DeleteAt AS deleteat, Type AS type, RootId AS rootid FROM Posts "
-        "WHERE ChannelId = %s ORDER BY CreateAt DESC LIMIT %s OFFSET %s",
+        "DeleteAt AS deleteat, Type AS type, RootId AS rootid, UpdateAt AS updateat, "
+        "Props AS props FROM Posts WHERE ChannelId = %s "
+        "ORDER BY CreateAt DESC LIMIT %s OFFSET %s",
         (channel_id, per_page, page * per_page),
     )
     posts = []
     for r in rows:
+        msg = (r.get("message") or "").strip()
+        props_text, props = props_display_text(r.get("props"))
         posts.append({
             "id": r["id"],
             "create_at": ms_to_s(r["createat"]),
             "user_id": r["userid"],
-            "message": r["message"] or "",
+            "message": msg or props_text,
             "deleted": bool(r.get("deleteat")),
+            "delete_at": ms_to_s(r.get("deleteat")) or 0,
             "type": r.get("type") or "",
             "is_system": (r.get("type") or "").startswith("system_"),
+            # True when the server kept the original text for a deleted post
+            "text_available": bool(msg or props_text),
+            "from_props": bool(not msg and props_text),
+            "props": props,
         })
     posts.reverse()
     return {
@@ -1043,6 +1089,7 @@ def db_chat_posts(channel_id: str, page: int = 0, per_page: int = 60) -> dict:
         "page": page,
         "per_page": per_page,
         "total": int(total or 0),
+        "deleted_total": int(deleted_total or 0),
         "has_more": (page + 1) * per_page < int(total or 0),
         "mode": "db",
     }
@@ -1076,6 +1123,8 @@ def chat_partners_via_api(user_id: str) -> tuple[list[dict], str | None]:
             if order:
                 post = (data.get("posts") or {}).get(order[0]) or {}
                 entry["preview"] = (post.get("message") or "")[:120]
+                entry["preview_deleted"] = bool(post.get("delete_at"))
+                entry["deleted_count"] = None  # the API does not expose totals
                 entry["last_post_at"] = ms_to_s(post.get("create_at")) or entry["last_post_at"]
         except MMError as exc:
             if exc.status == 403:
@@ -1100,18 +1149,25 @@ def chat_posts_via_api(channel_id: str, page: int = 0, per_page: int = 60) -> di
     posts = []
     for pid in (data.get("order") or []):
         p = (data.get("posts") or {}).get(pid) or {}
+        msg = (p.get("message") or "").strip()
+        props_text, props = props_display_text(p.get("props"))
         posts.append({
             "id": p.get("id"),
             "create_at": ms_to_s(p.get("create_at")),
             "user_id": p.get("user_id"),
-            "message": p.get("message") or "",
+            "message": msg or props_text,
             "deleted": bool(p.get("delete_at")),
+            "delete_at": ms_to_s(p.get("delete_at")) or 0,
             "type": p.get("type") or "",
             "is_system": (p.get("type") or "").startswith("system_"),
+            "text_available": bool(msg or props_text),
+            "from_props": bool(not msg and props_text),
+            "props": props,
         })
     posts.reverse()
     return {"channel_id": channel_id, "posts": posts, "page": page, "per_page": per_page,
-            "has_more": len(posts) == per_page, "total": None, "mode": "api"}
+            "has_more": len(posts) == per_page, "total": None,
+            "deleted_total": sum(1 for x in posts if x["deleted"]), "mode": "api"}
 
 
 # --------------------------------------------------------------------------- #
@@ -1151,10 +1207,13 @@ def run_mmctl(args: list[str], timeout: int = 45) -> tuple[bool, str]:
         return False, ("mmctl was not found on this server. Set MMCTL_PATH in .env or install "
                        "mmctl next to your Mattermost binary.")
     base = [binary, "--local"]
-    commands = [base + args]
+    commands: list[list[str]] = [base + args]
     if os.geteuid() == 0 and shutil.which("runuser"):
         # mmctl --local must run as the Mattermost system user
         commands.append(["runuser", "-u", MM_OS_USER, "--"] + base + args)
+    elif os.geteuid() != 0 and shutil.which("sudo"):
+        # install.sh grants this one command through a sudoers drop-in
+        commands.append(["sudo", "-n", "-u", MM_OS_USER, "--"] + base + args)
     last_error = ""
     for command in commands:
         try:

@@ -104,10 +104,17 @@ for i in range(8):
               "Can you review my PR when you get a chance?", "On it after lunch.",
               "Thanks!", "The deploy is scheduled for 5pm.", "Perfect.", "See you at standup."][i],
              300 - i * 30)
+# Deleted post whose text is still stored (Mattermost keeps it in the posts table)
+add_post("dm-john-mary", "u-john", "Delete this secret later, ok?", 30)
+POSTS["dm-john-mary"][-1]["delete_at"] = ms(0, 5)
+# Deleted post where the server also blanked the message
 add_post("dm-john-mary", "u-john", "This message was removed by the user later", 20)
 POSTS["dm-john-mary"][-1]["delete_at"] = ms(0, 5)
 POSTS["dm-john-mary"][-1]["message"] = ""
 add_post("dm-john-mary", "u-mary", "Are we still on for tomorrow?", 10)
+# A conversation that exists only as deleted history
+add_post("dm-mary-ali", "u-mary", "Old note that was removed", 400)
+POSTS["dm-mary-ali"][-1]["delete_at"] = ms(0, 350)
 add_post("dm-admin-john", "u-admin", "Hi John, welcome aboard!", 1500)
 add_post("dm-admin-john", "u-john", "Thanks Ada!", 1400)
 add_post("dm-admin-john", "u-admin", "Your laptop arrives Monday.", 1200)

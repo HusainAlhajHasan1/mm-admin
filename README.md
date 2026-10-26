@@ -14,6 +14,8 @@ No cloud services, no external JS/CSS, no build step — a small Flask app plus 
 |---|---|
 | ![Chats](docs/screenshots/chats.png) | ![Presence](docs/screenshots/presence.png) |
 
+![Deleted messages are shown with their text and deletion time](docs/screenshots/chats-deleted.png)
+
 | Locations | Settings |
 |---|---|
 | ![Locations](docs/screenshots/locations.png) | ![Settings](docs/screenshots/settings.png) |
@@ -190,6 +192,25 @@ After editing `.env`, restart the service. The Settings page shows **Database co
 
 Without `DATABASE_URL` the dashboard uses the normal API. You can still see the list of people a user has DM'd in many cases, but opening the conversation of two other users will usually fail with `403`, and the UI explains why. Chats where the admin is a participant work normally. This mode requires no database credentials.
 
+### Deleted messages
+
+When a user deletes a message in Mattermost it is **not** removed from the database. The row stays in `posts` with `DeleteAt > 0`, and in most cases the original `Message` text is still there:
+
+```sql
+SELECT createat, deleteat, message FROM posts WHERE deleteat > 0 LIMIT 10;
+```
+
+In **database mode** the dashboard shows these messages with the original text struck through, a red `deleted` badge and the exact deletion time. A **Deleted** switch in the conversation header hides or shows them; the conversation header also reports how many there are, and the partner list marks conversations that contain deleted history — including conversations whose every message was deleted.
+
+Limits worth knowing:
+
+* If a Mattermost admin ran a *hard* purge (`mmctl post ...`/retention), the row is gone and nothing can be recovered.
+* Some delete paths blank the message body while keeping the row. The dashboard then says the text is no longer stored, and falls back to the plugin `props` column (Calls and other plugins keep their visible text there).
+* Run `tools/debug_chat.py <user1> <user2>` on the server to see exactly what the database holds for a conversation — it prints the length of every message and flags deleted rows whose text is empty.
+* The REST API never returns other users' deleted messages, so **`DATABASE_URL` is required for this feature**.
+
+Tested by `tests/test_deleted_messages.py`, which runs the real SQL against a Mattermost-shaped database.
+
 ---
 
 ## Online / offline history
@@ -289,6 +310,7 @@ The agent only sends the Mattermost username, public IP, hostname and OS. It nev
 2. The middle column lists everyone that user has DM'd, with last-message previews.
 3. Click a person → the full conversation opens. **Load older messages** pages backwards.
 4. Request from the user: “show me his chats with X” maps directly onto this flow.
+5. Deleted messages appear struck through with their deletion time. Use the **Deleted** switch in the conversation header to hide them (the header shows the count).
 
 With database mode, the request runs as a read-only SQL query on the DM channel; the admin does not need to be a member.
 
@@ -308,7 +330,9 @@ With database mode, the request runs as a read-only SQL query on the DM channel;
 * **Delete permanently**: requires `ServiceSettings.EnableAPIUserDeletion = true` in Mattermost; otherwise the dashboard explains the problem and suggests `mmctl user delete <user> --confirm`.
 * **Delete team**: archives it (hidden from users, data kept). *Permanent* requires `ServiceSettings.EnableAPITeamDeletion = true`.
 
-If either flag is disabled, the dashboard automatically retries the permanent delete through **`mmctl`** when the binary is available (it is auto-detected at `/opt/mattermost/bin/mmctl`, `PATH`, or `MMCTL_PATH`). No extra setup is needed on a standard Mattermost install running as root; otherwise the dialog tells you exactly what to enable.
+If either flag is disabled, the dashboard automatically retries the permanent delete through **`mmctl`** when the binary is available (auto-detected at `/opt/mattermost/bin/mmctl`, in `PATH`, or via `MMCTL_PATH`).
+
+`install.sh` sets this up for you: when it finds `mmctl`, it writes a **narrowly scoped sudoers rule** (`/etc/sudoers.d/mm-admin-mmctl`) that lets the dashboard service run exactly that one binary as the Mattermost OS user, and relaxes `NoNewPrivileges` in the unit so `sudo` works. Nothing else on the host gains privileges. If `mmctl` is missing, the unit keeps full hardening and destructive actions stay API-only.
 
 ### Other per-user actions
 
@@ -370,6 +394,8 @@ From the user drawer (**Users → click a row**):
 | Login succeeds but pages 401 | Mattermost session expired — sign in again. |
 | Logged out randomly after changing config | `DASH_SECRET` changed; that's expected. |
 | Database configured but `db_ok=false` | Wrong URL/credentials, driver missing (`pip install psycopg2-binary` / `PyMySQL`), or DB not reachable from the LXC. |
+| `venv/bin/pip: No such file or directory` during install | Debian/Ubuntu ship `ensurepip` in a separate package, so `python3 -m venv` can produce a venv without pip. Fix: `apt-get install -y python3-venv python3$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])')-venv python3-pip`, then `rm -rf /opt/mm-admin/venv` and re-run `install.sh`. Current installers detect a pip-less venv and rebuild it automatically. |
+| `python3 -m venv` says "ensurepip is not available" | Same package as above (`python3-venv` plus the version-specific `python3.X-venv`). |
 
 Logs: `journalctl -u mm-admin -n 100 --no-pager`. Health probe: `GET /health`.
 
@@ -405,6 +431,9 @@ sudo userdel mm-admin 2>/dev/null || true
 ```
 mm-admin/
 ├── app.py                     Flask backend (APIs, auth, poller, geolocation)
+├── README.md                  this document
+├── PUBLISH-TO-GITHUB.md       how to publish the project and deploy from the repo
+├── LICENSE                    MIT
 ├── requirements.txt           Flask, waitress, requests
 ├── requirements-db.txt        psycopg2-binary, PyMySQL (optional)
 ├── install.sh                 installer for the LXC
@@ -420,7 +449,10 @@ mm-admin/
 ├── deploy/
 │   ├── mm-admin.service       dashboard systemd unit
 │   └── mm-location-agent.service
-└── data/                      created at runtime (SQLite + secret)
+├── tools/debug_chat.py        print what the DB holds for one conversation
+├── docs/screenshots/          UI screenshots used in this README
+├── tests/                     mock Mattermost API + smoke tests (dev only)
+└── data/                      created at runtime (SQLite + secret), git-ignored
 ```
 
 ---

@@ -178,7 +178,7 @@
     teams: [],
     counts: {},
     usersLoaded: false,
-    chat: { userId: null, partnerId: null, channelId: null, page: 0, messages: [], participants: {}, hasMore: false, mode: null, user: null, partner: null },
+    chat: { userId: null, partnerId: null, channelId: null, page: 0, messages: [], participants: {}, hasMore: false, mode: null, user: null, partner: null, showDeleted: true },
     presence: { hours: 24, rows: [], selected: null, now: null },
     locations: { tab: 'live', offset: 0, total: 0, timer: null },
     settings: null,
@@ -851,10 +851,15 @@
         $('#chat-partner-list').innerHTML = partners.map(function (p) {
           var partner = p.partner || {};
           var active = state.chat.partnerId === partner.id ? ' active' : '';
+          var preview = p.preview ? h(p.preview) : (p.deleted_count ? 'All messages deleted' : 'No messages');
+          if (p.preview && p.preview_deleted) preview = '<span class="del-preview">' + preview + '</span>';
+          var delBadge = p.deleted_count
+            ? '<span class="pill pill-del" title="' + p.deleted_count + ' deleted message(s) still in the database">' + p.deleted_count + ' del</span>'
+            : '';
           return '<div class="chat-user' + active + '" data-action="chat-partner" data-partner="' + h(partner.id) + '" data-channel="' + h(p.channel_id) + '">' +
             avatarHtml(partner, 'sm', true) +
-            '<div class="grow"><div class="name">' + h(partner.name || partner.username) + '</div>' +
-            '<div class="sub">' + (p.preview ? h(p.preview) : 'No messages') + '</div></div>' +
+            '<div class="grow"><div class="name">' + h(partner.name || partner.username) + ' ' + delBadge + '</div>' +
+            '<div class="sub">' + preview + '</div></div>' +
             '<div class="end"><span class="time">' + (p.last_post_at ? h(fmtRel(p.last_post_at)) : '') + '</span></div></div>';
         }).join('');
       }
@@ -886,7 +891,12 @@
     $('#chat-messages').innerHTML = '<div class="chat-empty"><div class="spinner"></div><span style="margin-top:10px">Loading messages…</span></div>';
     $('#chat-foot').classList.add('hidden');
     fetchChatPage(0, false).then(function () {
-      setSub('@' + (primary ? primary.username : '') + ' ↔ @' + partner.username + ' · ' + state.chat.messages.length + ' messages loaded');
+      var deleted = state.chat.messages.filter(function (m) { return m.deleted; }).length;
+      var line = '@' + (primary ? primary.username : '') + ' ↔ @' + partner.username +
+        ' · ' + state.chat.messages.length + ' messages' +
+        (deleted ? ' · ' + deleted + ' deleted' : '');
+      $('#chat-convo-sub').textContent = line;
+      setSub(line);
     });
   }
 
@@ -946,14 +956,17 @@
     var primaryId = state.chat.userId;
     var html = '';
     var lastDay = '';
+    var showDeleted = state.chat.showDeleted !== false;
+    var hiddenDeleted = 0;
     msgs.forEach(function (m) {
       if (!m.message && !m.deleted) return;
+      if (m.deleted && !showDeleted) { hiddenDeleted++; return; }
       var day = fmtDayKey(m.create_at);
       if (day && day !== lastDay) {
         html += '<div class="chat-date">' + h(fmtDayLabel(m.create_at)) + '</div>';
         lastDay = day;
       }
-      if (m.is_system) {
+      if (m.is_system && !m.deleted) {
         if (!m.message) return;
         html += '<div class="msg system"><div class="msg-bubble">' + h(m.message) + '</div></div>';
         return;
@@ -961,11 +974,30 @@
       var mine = m.user_id === primaryId;
       var name = participantName(m.user_id);
       var uname = participantUsername(m.user_id);
-      var text = m.deleted ? 'This message was deleted.' : m.message;
-      html += '<div class="msg' + (mine ? ' mine' : '') + (m.deleted ? ' deleted' : '') + '">' + avatarHtml({ username: uname || '?', name: name }, '', false) +
-        '<div class="msg-body"><div class="msg-meta"><span>' + h(name) + '</span><span>@' + h(uname || '?') + '</span><span>' + h(fmtTime(m.create_at)) + '</span></div>' +
-        '<div class="msg-bubble">' + h(text) + '</div></div></div>';
+      var meta = '<span>' + h(name) + '</span><span>@' + h(uname || '?') + '</span><span>' + h(fmtTime(m.create_at)) + '</span>';
+      var body, extraClass = '';
+      if (m.deleted) {
+        // Deleted messages keep living in the Mattermost database: show the text
+        // when the server retained it, and always show when it was deleted.
+        var hasText = !!(m.message && m.message.trim());
+        body = hasText ? h(m.message) : '<span class="gone">Text no longer stored by Mattermost</span>';
+        extraClass = hasText ? ' deleted-text' : ' gone';
+        meta += '<span class="deleted-tag">deleted</span>' +
+          (m.delete_at ? '<span class="deleted-when">' + h(fmtDateTime(m.delete_at)) + '</span>' : '') +
+          (m.from_props ? '<span class="deleted-when">plugin text</span>' : '');
+      } else {
+        body = h(m.message);
+      }
+      html += '<div class="msg' + (mine ? ' mine' : '') + (m.deleted ? ' deleted' : '') + (m.is_system ? ' system-row' : '') + '">' +
+        avatarHtml({ username: uname || '?', name: name }, '', false) +
+        '<div class="msg-body"><div class="msg-meta">' + meta + '</div>' +
+        '<div class="msg-bubble' + extraClass + '">' + body + '</div></div></div>';
     });
+    if (hiddenDeleted) {
+      html = '<div class="chat-hidden-note">' + hiddenDeleted + ' deleted message' +
+        (hiddenDeleted === 1 ? '' : 's') + ' hidden — switch “Deleted” on to show ' +
+        (hiddenDeleted === 1 ? 'it' : 'them') + '.</div>' + html;
+    }
     box.innerHTML = html || '<div class="chat-empty">' + icon('chat', 36) + '<strong>No messages</strong></div>';
   }
 
@@ -1337,7 +1369,9 @@
       (chat.error ? '<dt>Error</dt><dd style="color:#ff9d9d">' + h(chat.error) + '</dd>' : '') + '</dl>' +
       '<div class="section-title">Enable full chat visibility</div>' +
       '<pre class="code">' + h('# Add to .env, then restart the dashboard:\nDATABASE_URL=postgresql://mattermost:PASSWORD@127.0.0.1:5432/mattermost\n# or: DATABASE_URL=mysql://mattermost:PASSWORD@127.0.0.1:3306/mattermost') + '</pre>' +
-      '<p class="tiny muted" style="margin-top:10px">The connection is opened read-only. Use a dedicated DB user with SELECT-only rights where possible. Reading private conversations should be covered by your organisation\'s policy — inform your users.</p></div>' +
+      '<p class="tiny muted" style="margin-top:10px">The connection is opened read-only. Use a dedicated DB user with SELECT-only rights where possible. Reading private conversations should be covered by your organisation\'s policy — inform your users.</p>' +
+      '<div class="callout" style="margin-top:12px">' + icon('info') + '<div><strong>Deleted messages</strong> stay in the <code>posts</code> table with <code>DeleteAt &gt; 0</code>, and Mattermost usually keeps the original text. In database mode this dashboard shows them with a <em>deleted</em> badge and their deletion time; use the <strong>Deleted</strong> switch above a conversation to hide them. The REST API cannot provide this — a database connection is required.</div></div>' +
+      '</div>' +
       '<div class="card"><div class="card-head"><h2>Location agent</h2></div>' +
       '<p class="small muted" style="margin-bottom:12px">Optional agent for city-level tracking of user machines (public IP based). Download the script with your key pre-filled.</p>' +
       '<a class="btn btn-sm btn-primary" href="/download/agent.py" download>' + icon('download', 13) + ' Download agent</a> ' +
@@ -2004,6 +2038,14 @@
 
   // Chat search
   $('#chat-user-search').addEventListener('input', debounce(renderChatUserList, 140));
+  var showDeletedBox = $('#chat-show-deleted');
+  if (showDeletedBox) {
+    showDeletedBox.addEventListener('change', function () {
+      state.chat.showDeleted = showDeletedBox.checked;
+      renderMessages();
+    });
+  }
+
   $('#chat-refresh').addEventListener('click', function () {
     if (state.chat.channelId) {
       state.chat.messages = []; state.chat.page = 0;
