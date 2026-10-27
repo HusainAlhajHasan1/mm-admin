@@ -144,7 +144,7 @@ AGENT_URL_HINT = _env("PUBLIC_URL", "")  # optional public base URL shown to age
 MMCTL_PATH = _env("MMCTL_PATH", "")  # optional path to mmctl for operations the API forbids
 MM_OS_USER = _env("MM_OS_USER", "mattermost")  # OS user that owns the Mattermost install
 MM_DATA_DIR = _env("MM_DATA_DIR", "")  # FileSettings.Directory (default: auto-detect)
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)) or DATA_DIR, exist_ok=True)
@@ -1315,6 +1315,37 @@ def run_mmctl(args: list[str], timeout: int = 45) -> tuple[bool, str]:
 # Audit log (dashboard actions)
 # --------------------------------------------------------------------------- #
 
+def username_of(state: dict | None, fallback: str) -> str:
+    return (state or {}).get("username") or fallback
+
+
+def probe_user(user_id: str) -> dict:
+    """Current state of a user on the Mattermost server: exists? delete_at?"""
+    try:
+        data = mm_request("GET", f"/users/{user_id}").json()
+    except MMError as exc:
+        if exc.status == 404:
+            return {"exists": False, "delete_at": 0, "username": None}
+        raise
+    return {"exists": True,
+            "delete_at": int(data.get("delete_at") or 0),
+            "username": data.get("username"),
+            "active": not bool(data.get("delete_at"))}
+
+
+def probe_team(team_id: str) -> dict:
+    try:
+        data = mm_request("GET", f"/teams/{team_id}").json()
+    except MMError as exc:
+        if exc.status == 404:
+            return {"exists": False, "delete_at": 0, "name": None}
+        raise
+    return {"exists": True,
+            "delete_at": int(data.get("delete_at") or 0),
+            "name": data.get("name"),
+            "active": not bool(data.get("delete_at"))}
+
+
 def log_admin(action: str, target: str = "", details: str | dict | int = "") -> None:
     if isinstance(details, (dict, list)):
         details = json.dumps(details, ensure_ascii=False)
@@ -1819,34 +1850,81 @@ def api_user_delete(user_id: str):
     if user_id == session.get("user_id"):
         return jsonify({"ok": False, "message": "You cannot delete your own account."}), 400
     permanent = request.args.get("permanent") == "1"
+    before = probe_user(user_id)
+    api_error = ""
+    mmctl_error = ""
+
     if permanent:
-        target = None
-        try:
-            target = mm_request("GET", f"/users/{user_id}").json()
-        except MMError:
-            target = None
+        # 1) Ask Mattermost to delete for good.
         try:
             mm_request("DELETE", f"/users/{user_id}", params={"permanent": "true"})
         except MMError as exc:
-            if exc.status in (400, 403, 500, 501):
-                username = (target or {}).get("username") or user_id
-                ok, output = run_mmctl(["user", "delete", username, "--confirm"])
-                if not ok:
-                    return jsonify({
-                        "ok": False,
-                        "code": "PERMANENT_DELETE_DISABLED",
-                        "message": "Permanent deletion is blocked by this Mattermost server. "
-                                   "Enable ServiceSettings.EnableAPIUserDeletion, or let the "
-                                   "dashboard use mmctl (install mmctl / set MMCTL_PATH in .env). "
-                                   f"API said: {exc.message}. mmctl said: {output[:300]}",
-                    }), 400
-        action = "user.delete_permanent"
-    else:
+            if exc.status not in (400, 403, 404, 500, 501):
+                raise
+            api_error = exc.message
+
+        after = probe_user(user_id)
+        # Some builds answer 200 but only deactivate. Verify, then escalate.
+        if after["exists"]:
+            username = after.get("username") or (before or {}).get("username") or user_id
+            ok, output = run_mmctl(["user", "delete", username, "--confirm"])
+            mmctl_error = "" if ok else output
+            after = probe_user(user_id)
+
+        if not after["exists"]:
+            invalidate_caches()
+            log_admin("user.delete_permanent", target=user_id, details={"api_error": api_error})
+            return jsonify({"ok": True, "result": "deleted", "username": username_of(before, user_id)})
+
+        # Still there: report the truth instead of pretending it worked.
+        if after.get("delete_at"):
+            invalidate_caches()
+            log_admin("user.deactivate", target=user_id,
+                      details={"requested": "permanent", "api_error": api_error,
+                               "mmctl_error": mmctl_error})
+            return jsonify({
+                "ok": True,
+                "result": "deactivated",
+                "warning": ("The account was deactivated, not permanently deleted. "
+                            "Mattermost refuses permanent deletion while "
+                            "ServiceSettings.EnableAPIUserDeletion is false, and the dashboard "
+                            "could not run mmctl"
+                            + (f" ({mmctl_error[:160]})" if mmctl_error else "") +
+                            ". The user disappears from Mattermost and can no longer sign in, "
+                            "but the account still exists. To really delete it: enable "
+                            "EnableAPIUserDeletion in config.json, or install mmctl, then try again."),
+                "api_error": api_error,
+                "mmctl_error": mmctl_error,
+            })
+        return jsonify({
+            "ok": False,
+            "code": "DELETE_NOT_APPLIED",
+            "message": ("Mattermost did not delete or deactivate this account."
+                        + (f" API said: {api_error}" if api_error else "")
+                        + (f" mmctl said: {mmctl_error[:200]}" if mmctl_error else "")),
+        }), 400
+
+    # Soft delete (deactivate)
+    try:
         mm_request("PUT", f"/users/{user_id}/active", json_body={"active": False})
-        action = "user.deactivate"
-    invalidate_caches()
-    log_admin(action, target=user_id)
-    return jsonify({"ok": True})
+    except MMError as exc:
+        api_error = exc.message
+        if exc.status not in (400, 403, 500):
+            raise
+    after = probe_user(user_id)
+    if after.get("exists") and after.get("delete_at"):
+        invalidate_caches()
+        log_admin("user.deactivate", target=user_id)
+        return jsonify({"ok": True, "result": "deactivated"})
+    if not after["exists"]:
+        invalidate_caches()
+        log_admin("user.delete_permanent", target=user_id)
+        return jsonify({"ok": True, "result": "deleted"})
+    return jsonify({
+        "ok": False,
+        "code": "DEACTIVATE_NOT_APPLIED",
+        "message": "Mattermost did not deactivate this account." + (f" API said: {api_error}" if api_error else ""),
+    }), 400
 
 
 @app.put("/api/users/<user_id>/password")
@@ -2037,28 +2115,50 @@ def api_create_team():
 def api_delete_team(team_id: str):
     permanent = request.args.get("permanent") == "1"
     params = {"permanent": "true"} if permanent else None
+    before = probe_team(team_id)
+    api_error = ""
+    mmctl_error = ""
+
     try:
         mm_request("DELETE", f"/teams/{team_id}", params=params)
     except MMError as exc:
-        if permanent and exc.status in (400, 403, 500, 501):
-            try:
-                team = mm_request("GET", f"/teams/{team_id}").json()
-            except MMError:
-                team = {}
-            ok, output = run_mmctl(["team", "delete", team.get("name") or team_id])
-            if not ok:
-                return jsonify({
-                    "ok": False,
-                    "message": "Permanent team deletion is blocked on this server. "
-                               "Enable ServiceSettings.EnableAPITeamDeletion, use a normal "
-                               "(archive) delete, or install mmctl and set MMCTL_PATH. "
-                               f"API said: {exc.message}. mmctl said: {output[:300]}",
-                }), 400
+        if permanent and exc.status in (400, 403, 404, 500, 501):
+            api_error = exc.message
         else:
             raise
-    invalidate_caches()
-    log_admin("team.delete_permanent" if permanent else "team.archive", target=team_id)
-    return jsonify({"ok": True})
+
+    after = probe_team(team_id)
+    if permanent and after["exists"]:
+        name = after.get("name") or (before or {}).get("name") or team_id
+        ok, output = run_mmctl(["team", "delete", name])
+        mmctl_error = "" if ok else output
+        after = probe_team(team_id)
+
+    if not after["exists"]:
+        invalidate_caches()
+        log_admin("team.delete_permanent" if permanent else "team.archive", target=team_id)
+        return jsonify({"ok": True, "result": "deleted"})
+
+    if after.get("delete_at"):
+        invalidate_caches()
+        log_admin("team.archive", target=team_id,
+                  details={"requested": "permanent" if permanent else "archive",
+                           "api_error": api_error, "mmctl_error": mmctl_error})
+        payload = {"ok": True, "result": "archived"}
+        if permanent:
+            payload["warning"] = ("The team was archived, not permanently deleted. Mattermost "
+                                  "refuses permanent deletion while ServiceSettings."
+                                  "EnableAPITeamDeletion is false, and mmctl could not be used"
+                                  + (f" ({mmctl_error[:160]})" if mmctl_error else "") +
+                                  ". Archived teams are hidden from users and can be restored.")
+        return jsonify(payload)
+
+    return jsonify({
+        "ok": False,
+        "code": "DELETE_NOT_APPLIED",
+        "message": "Mattermost did not delete this team."
+                   + (f" API said: {api_error}" if api_error else ""),
+    }), 400
 
 
 @app.post("/api/teams/<team_id>/members")

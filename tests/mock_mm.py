@@ -92,6 +92,12 @@ POSTS = {cid: [] for cid in CHANNELS}
 # post_id -> list of attached files (shape mirrors the Mattermost API metadata)
 FILES_BY_POST = {}
 
+# Mirrors config.json ServiceSettings flags on a real server.
+SERVER_FLAGS = {
+    "EnableAPIUserDeletion": False,   # false => permanent delete only deactivates
+    "EnableAPITeamDeletion": False,   # false => permanent delete only archives
+}
+
 
 def add_post(channel_id, user_id, message, minutes_ago, ptype=""):
     pid = "p-%s-%d" % (channel_id, len(POSTS[channel_id]) + 1)
@@ -147,6 +153,7 @@ def _snapshot():
         "channels": copy.deepcopy(CHANNELS),
         "posts": copy.deepcopy(POSTS),
         "statuses": copy.deepcopy(STATUSES),
+        "flags": copy.deepcopy(SERVER_FLAGS),
     }
 
 
@@ -322,7 +329,13 @@ def delete_user(uid):
     if not user:
         return err(404, "User not found")
     if request.args.get("permanent") == "true":
-        return err(501, "User deletion is disabled on this server.", "app.user.delete.app_error")
+        if SERVER_FLAGS["EnableAPIUserDeletion"]:
+            USERS.pop(uid, None)
+            return jsonify({"status": "OK"})
+        # Real Mattermost: falls back to a soft delete and still answers 200,
+        # which is why a dashboard must verify the result.
+        user["delete_at"] = int(time.time() * 1000)
+        return jsonify({"status": "OK"})
     user["delete_at"] = int(time.time() * 1000)
     return jsonify({"status": "OK"})
 
@@ -412,8 +425,10 @@ def get_team(tid):
     if not auth_user():
         return err(401, "Not authenticated")
     team = TEAMS.get(tid)
-    if not team or team["delete_at"]:
+    if not team:
         return err(404, "Team not found", "app.team.get.app_error")
+    # Real Mattermost returns archived teams (with delete_at set) to sysadmins,
+    # which is how a client can tell "archived" apart from "deleted".
     return jsonify(team)
 
 
@@ -441,10 +456,11 @@ def delete_team(tid):
     team = TEAMS.get(tid)
     if not team:
         return err(404, "Team not found")
-    if request.args.get("permanent") == "true":
+    if request.args.get("permanent") == "true" and SERVER_FLAGS["EnableAPITeamDeletion"]:
         del TEAMS[tid]
         MEMBERS.pop(tid, None)
     else:
+        # Real Mattermost archives (soft-deletes) when permanent deletion is off.
         team["delete_at"] = int(time.time() * 1000)
     return jsonify({"status": "OK"})
 
@@ -558,6 +574,16 @@ def audits():
     return err(403, "Audit log access is not enabled in this mock.", "api.context.permissions.app_error")
 
 
+@app.post("/mock/flags")
+def mock_flags():
+    """Test helper: set EnableAPIUserDeletion / EnableAPITeamDeletion."""
+    data = request.get_json(silent=True) or {}
+    for key in ("EnableAPIUserDeletion", "EnableAPITeamDeletion"):
+        if key in data:
+            SERVER_FLAGS[key] = bool(data[key])
+    return jsonify({"ok": True, "flags": SERVER_FLAGS})
+
+
 @app.post("/mock/reset")
 def mock_reset():
     """Restore the mock to its initial state (test helper)."""
@@ -568,6 +594,7 @@ def mock_reset():
         CHANNELS.clear(); CHANNELS.update(copy.deepcopy(_INITIAL_STATE["channels"]))
         POSTS.clear(); POSTS.update(copy.deepcopy(_INITIAL_STATE["posts"]))
         STATUSES.clear(); STATUSES.update(copy.deepcopy(_INITIAL_STATE["statuses"]))
+        SERVER_FLAGS.clear(); SERVER_FLAGS.update(copy.deepcopy(_INITIAL_STATE["flags"]))
     return jsonify({"ok": True})
 
 

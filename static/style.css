@@ -607,6 +607,9 @@ body.modal-open { overflow: hidden; }
 .toast.error { border-color: rgba(239, 68, 68, 0.35); }
 .toast.error svg { color: #ff8080; }
 .toast.info svg { color: #7ba7ff; }
+.toast.warn { border-color: rgba(245, 158, 11, 0.4); background: #221a0f; }
+.toast.warn svg { color: #fbbf24; }
+.toast { cursor: pointer; }
 .toast strong { color: var(--text); font-weight: 600; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 

@@ -18,6 +18,11 @@ server. They are harmless in production but can be deleted.
   seed_demo.py    Fills the local SQLite with representative presence and
                   location history so the UI can be reviewed.
 
+  test_delete_truth.py
+                  Checks that "delete user/team" reports the real outcome when the
+                  server has EnableAPIUserDeletion / EnableAPITeamDeletion off
+                  (Mattermost then only deactivates but still answers 200).
+
   test_deleted_messages.py
                   Verifies that database-mode chat reading returns deleted
                   posts (text, deletion time, counts) by running the real

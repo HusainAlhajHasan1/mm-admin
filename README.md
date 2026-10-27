@@ -360,6 +360,40 @@ If either flag is disabled, the dashboard automatically retries the permanent de
 
 `install.sh` sets this up for you: when it finds `mmctl`, it writes a **narrowly scoped sudoers rule** (`/etc/sudoers.d/mm-admin-mmctl`) that lets the dashboard service run exactly that one binary as the Mattermost OS user, and relaxes `NoNewPrivileges` in the unit so `sudo` works. Nothing else on the host gains privileges. If `mmctl` is missing, the unit keeps full hardening and destructive actions stay API-only.
 
+### Why "deleted" sometimes means "deactivated"
+
+Mattermost only deletes accounts for real when `ServiceSettings.EnableAPIUserDeletion`
+is `true`. With the default (`false`) it still answers **HTTP 200** to
+`DELETE /users/{id}?permanent=true` — but it merely *deactivates* the account.
+
+The dashboard never trusts that response: after every destructive call it re-reads
+the user from Mattermost and reports what actually happened.
+
+| Server state | What you see |
+|---|---|
+| Deleting works (flag on, or `mmctl` available) | ✅ "permanently deleted" |
+| Flag off, no `mmctl` | ⚠️ "Deactivated — not permanently deleted", with the reason |
+| Neither worked | ❌ error, nothing is claimed |
+
+Teams behave the same way: without `EnableAPITeamDeletion` a permanent delete only
+**archives** the team, and the dashboard says "archived".
+
+To enable real deletion in `config.json`:
+
+```json
+"ServiceSettings": {
+    "EnableAPIUserDeletion": true,
+    "EnableAPITeamDeletion": true
+}
+```
+
+Or keep the flags off and let the dashboard use `mmctl` (installed automatically by
+`install.sh` when the binary exists).
+
+Note that "deactivated" is still a real, useful state: the user cannot sign in, does
+not appear in search, and their messages remain attributed to them. Use **Activate**
+in the user drawer to undo it.
+
 ### Other per-user actions
 
 From the user drawer (**Users → click a row**):
@@ -416,6 +450,7 @@ From the user drawer (**Users → click a row**):
 | Presence timeline empty | The poller needs a token: set `MM_ADMIN_TOKEN` or keep an admin signed in; check `journalctl -u mm-admin`. |
 | No location data | Check the agent key/URL; audit logging may be off; LAN devices show “Local network”. |
 | Port unreachable from LAN | `DASH_HOST=0.0.0.0`, `ufw allow 8090/tcp`, or firewalld port; Proxmox firewall rules. |
+| "Deleted" but the user is still there | Expected when `EnableAPIUserDeletion=false`: Mattermost only deactivates. The dashboard now says so. Enable the flag or install `mmctl` for a real delete. |
 | Permanent delete refuses | Enable `EnableAPIUserDeletion` / `EnableAPITeamDeletion` in Mattermost, install `mmctl` (auto-detected) so the dashboard can fall back to it, or use deactivate/archive. |
 | Login succeeds but pages 401 | Mattermost session expired — sign in again. |
 | Logged out randomly after changing config | `DASH_SECRET` changed; that's expected. |

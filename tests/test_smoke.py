@@ -145,7 +145,12 @@ def main():
     check("password reset", s.put(BASE + f"/api/users/{bob['id']}/password", headers=H,
                                   json={"password": "newpass123"}).status_code == 200)
     r = s.delete(BASE + f"/api/users/{bob['id']}?permanent=1", headers=H)
-    check("permanent delete explains server restriction", r.status_code == 400 and "message" in (r.json() or {}))
+    # Server has EnableAPIUserDeletion=false, so it only deactivates; the API must
+    # say so instead of claiming a real deletion.
+    body = r.json() if r.content else {}
+    check("permanent delete reports the real outcome",
+          r.status_code == 200 and body.get("result") == "deactivated" and body.get("warning"),
+          str(body)[:160])
     check("deactivate user", s.delete(BASE + f"/api/users/{bob['id']}", headers=H).status_code == 200)
     check("delete team", s.delete(BASE + f"/api/teams/{qa['id']}", headers=H).status_code == 200)
 

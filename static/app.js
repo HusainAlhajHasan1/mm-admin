@@ -246,20 +246,23 @@
   }
 
   /* ---------------------------------------------------------------- ui primitives */
-  function toast(message, type, title) {
+  function toast(message, type, title, ms) {
     type = type || 'info';
     var root = $('#toast-root');
     var el = document.createElement('div');
     el.className = 'toast ' + type;
     var ic = type === 'success' ? icon('check') : type === 'error' ? icon('alert') : icon('info');
     el.innerHTML = ic + '<div>' + (title ? '<strong>' + h(title) + '</strong><br>' : '') + h(message) + '</div>';
+    el.title = 'Click to dismiss';
+    el.addEventListener('click', function () { el.remove(); });
     root.appendChild(el);
+    var life = ms || (type === 'error' ? 7000 : type === 'warn' ? 9000 : 4200);
     setTimeout(function () {
       el.style.opacity = '0';
       el.style.transform = 'translateY(6px)';
       el.style.transition = 'all .2s ease';
       setTimeout(function () { el.remove(); }, 220);
-    }, type === 'error' ? 7000 : 4200);
+    }, life);
   }
 
   function modal(opts) {
@@ -1831,9 +1834,23 @@
     });
     function run(permanent) {
       var url = '/users/' + encodeURIComponent(userId) + (permanent ? '?permanent=1' : '');
-      api(url, { method: 'DELETE' }).then(function () {
-        toast(permanent ? 'User permanently deleted.' : 'User deactivated.', 'success');
+      api(url, { method: 'DELETE' }).then(function (data) {
+        var result = (data && data.result) || (permanent ? 'deleted' : 'deactivated');
         m.close();
+        if (result === 'deleted') {
+          toast('@' + u.username + ' was permanently deleted.', 'success');
+        } else if (result === 'deactivated') {
+          if (permanent) {
+            // Asked for a permanent delete but the server only deactivated.
+            toast('@' + u.username + ' was deactivated — not permanently deleted. ' +
+                  'Enable EnableAPIUserDeletion or install mmctl to delete for real.',
+                  'warn', 'Only deactivated', 12000);
+          } else {
+            toast('@' + u.username + ' was deactivated.', 'success');
+          }
+        } else {
+          toast('The server reported success but @' + u.username + ' is unchanged.', 'error');
+        }
         refreshAfterMutation();
       }).catch(function (err) {
         toast(err.message, 'error', permanent ? 'Permanent delete failed' : 'Delete failed');
@@ -1862,9 +1879,14 @@
     $('#dt-delete', m.el).addEventListener('click', function () {
       var permanent = m.el.querySelector('#dt-perm').checked;
       api('/teams/' + encodeURIComponent(teamId) + (permanent ? '?permanent=1' : ''), { method: 'DELETE' })
-        .then(function () {
-          toast('Team ' + (permanent ? 'permanently deleted' : 'archived') + '.', 'success');
+        .then(function (data) {
+          var result = (data && data.result) || 'archived';
           m.close();
+          if (result === 'deleted') toast('Team permanently deleted.', 'success');
+          else if (result === 'archived' && permanent) {
+            toast('Team was archived, not permanently deleted. Enable EnableAPITeamDeletion ' +
+                  'or install mmctl to delete for real.', 'warn', 'Only archived', 12000);
+          } else toast('Team archived.', 'success');
           refreshAfterMutation();
         }).catch(function (err) { toast(err.message, 'error', 'Delete failed'); });
     });
